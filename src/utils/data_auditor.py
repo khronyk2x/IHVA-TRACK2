@@ -1,3 +1,5 @@
+from src.utils.clinical_validator import ClinicalPlausibilityValidator
+from src.utils.deidentifier import ClinicalDeidentifier
 import re
 import pandas as pd
 import numpy as np
@@ -16,6 +18,8 @@ class ClinicalDataAuditor:
         self.icd_mapper = ICD10OntologyMapper()
         self.extractor = OrganizerRecordExtractor()
         self.cleaner = ClinicalTextCleaner(expand_abbreviations=True)
+        self.plausibility_validator = ClinicalPlausibilityValidator()
+        self.deidentifier = ClinicalDeidentifier()
 
     def audit_record(self, row: Dict[str, Any]) -> Dict[str, Any]:
         """Audits a single clinical record for data quality lapses, coding errors, and missing fields."""
@@ -105,6 +109,14 @@ class ClinicalDataAuditor:
             if not re.search(r'\d+\s*(?:mg|g|mcg|ml|puffs?|tablets?|caps?)', meds, re.IGNORECASE):
                 lapses.append("Medication Dosage Missing (Drug name listed without explicit dosage/frequency)")
                 score -= 10
+
+        # 5. Biometric Plausibility & Sex/Age Mismatch Checks
+        plaus_anomalies = self.plausibility_validator.validate_record(row)
+        for anom in plaus_anomalies:
+            lapses.append(anom["description"])
+            score -= 25
+            if anom["severity"] == "Critical":
+                severity = "Critical Lapse"
 
         score = max(0, min(100, score))
 
@@ -230,3 +242,6 @@ class ClinicalDataAuditor:
             filtered = filtered.sort_values(by=sort_by, ascending=ascending)
 
         return filtered
+    def deidentify_dataset(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Strips all PHI / PII identifiers from the dataset (Safe Harbor & NDPA compliant)."""
+        return self.deidentifier.deidentify_dataframe(df)

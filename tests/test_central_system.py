@@ -137,5 +137,29 @@ class TestCentralSystem(unittest.TestCase):
         self.assertEqual(len(rectified_df), 2)
         self.assertEqual(rectified_df.iloc[1]["icd10"], "J45.9")
 
+
+    def test_deidentification_and_pediatric_plausibility(self):
+        auditor = ClinicalDataAuditor()
+        
+        # Test Pediatric 5yo 90kg mismatch
+        df_ped = pd.DataFrame([{
+            "id": "T2_PED_01", "source_encounter_id": "E0991", "variant_id": 1,
+            "patient_age": 5, "patient_gender": "Male",
+            "clinical_narrative": "Child aged 5 years presenting with fever. Weight: 90kg.",
+            "chief_complaint": "Fever", "hpi": "Fever for 2 days", "pmh": "None",
+            "exam": "Weight 90kg", "differential": "Malaria", "final_diagnosis": "Malaria",
+            "icd10": "B54", "investigations": "Malaria RDT",
+            "medications": "Artemether-Lumefantrine 20/120mg PO", "treatment_plan": "Oral ACT",
+            "soap_note": "S: Fever. O: Wt 90kg. A: Malaria. P: ACT."
+        }])
+        
+        audit_res = auditor.audit_dataframe(df_ped)
+        self.assertEqual(audit_res["critical_records"], 1)
+        self.assertIn("Pediatric Weight Mismatch", audit_res["audited_df"].iloc[0]["Lapses_Detected"])
+
+        # Test De-identification
+        deid_df = auditor.deidentify_dataset(df_ped)
+        self.assertIn("Anonymous Patient", deid_df.iloc[0]["patient_name"])
+
 if __name__ == '__main__':
     unittest.main()

@@ -892,6 +892,13 @@ elif "7. Bulk Import" in portal_choice:
                 search_kw = st.text_input("Live Keyword Search:", placeholder="Filter by patient, condition, drug...")
 
             min_score_slider = st.slider("Minimum Quality Score Threshold (%):", min_value=0, max_value=100, value=0)
+            
+            c_priv1, c_priv2 = st.columns([1.5, 1])
+            with c_priv1:
+                safe_harbor_mode = st.toggle("?? Safe Harbor & NDPA Privacy Mode (Mask all PHI/PII, Phone Numbers, Patient Names)", value=False, key="safe_harbor_tog")
+            with c_priv2:
+                if safe_harbor_mode:
+                    st.success("PHI/PII Redacted: Names, phones, emails, and addresses masked.")
 
             # Apply sorting & filtering
             display_df = data_auditor.sort_and_filter(
@@ -903,7 +910,10 @@ elif "7. Bulk Import" in portal_choice:
                 min_quality_score=min_score_slider
             )
 
-            st.markdown(f"**Showing {len(display_df)} of {len(audited_df)} Audited Records**")
+            if safe_harbor_mode:
+                display_df = data_auditor.deidentify_dataset(display_df)
+
+            st.markdown(f"**Showing {len(display_df)} of {len(audited_df)} Audited Records** (Privacy Shield: {'ON' if safe_harbor_mode else 'OFF'})")
 
             # 1-Click AI Auto-Rectification Action
             col_act1, col_act2 = st.columns([1.5, 1])
@@ -979,20 +989,30 @@ elif "7. Bulk Import" in portal_choice:
         df_export = registry.get_all_records_df()
         st.markdown(f"**Total Records Available for Export:** `{len(df_export)}`")
 
-        col_ex1, col_ex2 = st.columns(2)
+        col_ex1, col_ex2, col_ex3 = st.columns(3)
         with col_ex1:
             csv_exp = df_export.to_csv(index=False)
             st.download_button(
-                label="Download Full 15-Column Dataset (CSV)",
+                label="Download Full Dataset (CSV)",
                 data=csv_exp,
                 file_name="MediScribe_Universal_15Column_Dataset.csv",
                 mime="text/csv",
                 use_container_width=True
             )
         with col_ex2:
+            df_deid_exp = data_auditor.deidentify_dataset(df_export)
+            csv_deid = df_deid_exp.to_csv(index=False)
+            st.download_button(
+                label="Download De-identified Dataset (Safe Harbor CSV)",
+                data=csv_deid,
+                file_name="MediScribe_Deidentified_SafeHarbor_Dataset.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        with col_ex3:
             json_exp = df_export.to_json(orient="records", indent=2)
             st.download_button(
-                label="Download Full Clinical Dataset (JSON)",
+                label="Download Clinical Ledger (JSON)",
                 data=json_exp,
                 file_name="MediScribe_Clinical_Ledger.json",
                 mime="application/json",
