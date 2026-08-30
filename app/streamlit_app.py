@@ -545,13 +545,19 @@ elif "3. Lab Queue" in portal_choice:
     col_l1, col_l2 = st.columns([1, 1.2])
 
     with col_l1:
-        st.subheader("Ordered Investigations (Doctor Note)")
+        st.subheader("Clinical Orders & Patient Stats")
+        enc_info = care_card_prev.get("encounter", {})
+        st.markdown(f"**Patient**: `{enc_info.get('patient_name', lab_enc_choice)}` | **Age/Gender**: `{enc_info.get('age', 'Adult')}` `{enc_info.get('gender', '')}`")
+        st.markdown(f"**Attending Physician**: `{enc_info.get('assigned_doctor', 'Dr. Sarah Smith, MD')}`")
+        
+        v_str = ", ".join([f"{k}: {v}" for k, v in enc_info.get("vitals", {}).items()]) if enc_info.get("vitals") else "Vitals recorded"
+        st.markdown(f"**Nurse Intake Vitals**: `{v_str}`")
+
         if init_inv:
-            st.info(f"**Ordered Tests**: {init_inv.get('investigations', 'Malaria RDT; FBC; Urinalysis')}")
-            st.markdown(f"**Preliminary Diagnosis**: `{init_inv.get('final_diagnosis', 'N/A')}` (ICD-10: `{init_inv.get('icd10', 'N/A')}`)")
-            st.markdown(f"**Doctor Exam Notes**: {init_inv.get('exam', 'Vitals recorded')}")
+            st.success(f"**Ordered Investigations**: {init_inv.get('investigations', 'Malaria RDT; Full Blood Count')}")
+            st.info(f"**Doctor's Working Diagnosis**: `{init_inv.get('final_diagnosis', 'N/A')}` (ICD-10: `{init_inv.get('icd10', 'N/A')}`)\n\n**Chief Complaint**: {init_inv.get('chief_complaint', 'N/A')}\n\n**Physical Exam**: {init_inv.get('exam', 'N/A')}")
         else:
-            st.info("Ordered Tests: Malaria RDT; Full Blood Count; Peak flow evaluation")
+            st.info("**Ordered Investigations**: Malaria RDT; Full Blood Count (FBC); Blood Glucose\n\n**Working Diagnosis**: Suspected Acute Febrile Illness")
 
     with col_l2:
         st.subheader("Submit Diagnostic Results")
