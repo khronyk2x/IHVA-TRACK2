@@ -72,6 +72,8 @@ def load_nlp_components():
     return cleaner, extractor, generator, classifier, llm_engine, icd_mapper, org_extractor, ocr_scanner, audio_transcriber
 
 cleaner, extractor, generator, classifier, llm_engine, icd_mapper, org_extractor, ocr_scanner, audio_transcriber = load_nlp_components()
+soap_generator = generator
+entity_extractor = extractor
 
 registry = CentralClinicalRegistry()
 
