@@ -257,7 +257,7 @@ elif "2. Doctor Queue" in portal_choice:
         with col_d1:
             st.subheader(f"Encounter: {selected_enc} - {p_name_val}")
 
-            st.markdown("**Capture Tools (Click to Engage):**")
+            st.markdown("**Multi-Modal Capture Tools:**")
             c_o, c_v = st.columns(2)
             with c_o:
                 if st.button("Camera / OCR Document", use_container_width=True, key="btn_ocr_d"):
@@ -298,33 +298,97 @@ elif "2. Doctor Queue" in portal_choice:
             doc_narrative = st.text_area(
                 "Physician Consultation Notes & Dialogue:",
                 value=st.session_state["transcript_text"],
-                height=260,
+                height=240,
                 key="doc_narrative_box"
             )
 
             if st.button("Synthesize Gold-Standard SOAP & 15-Column Care Card", type="primary", use_container_width=True, key="btn_org_ai_d"):
                 with st.spinner("Synthesizing Gold-Standard SOAP Note & 15-Column Clinical Care Card..."):
                     extracted = org_extractor.extract_record(doc_narrative, encounter_id=selected_enc)
+                    soap_res = soap_generator.generate_soap_note(doc_narrative)
+                    cleaned_narrative = cleaner.clean_text(doc_narrative)
+                    entities_extracted = entity_extractor.extract_all(cleaned_narrative)
+                    pred_spec, triage_lvl = classifier.predict(cleaned_narrative)
+                    recs_data = llm_engine.generate_recommendations(entities_extracted, pred_spec)
+
                     st.session_state["doc_structured_edit"] = extracted
-                    st.success("Gold-Standard SOAP & 15-Column structuring complete! Review and edit fields on the right.")
+                    st.session_state["doc_soap_details"] = soap_res
+                    st.session_state["doc_entities"] = entities_extracted
+                    st.session_state["doc_recs"] = recs_data
+                    st.session_state["doc_specialty"] = pred_spec
+                    st.session_state["doc_triage"] = triage_lvl
+                    st.success("Gold-Standard SOAP Note & 15-Column Care Card synthesized with clinical suggestions!")
+
+            # Detailed AI Clinical Suggestions & Negations View
+            if st.session_state.get("doc_recs"):
+                recs = st.session_state["doc_recs"]
+                st.markdown("---")
+                st.markdown("##### AI Clinical Decision Support & Suggestions")
+                col_sg1, col_sg2 = st.columns(2)
+                with col_sg1:
+                    st.markdown(f"**Predicted Specialty**: `{st.session_state.get('doc_specialty', 'Internal Medicine')}`")
+                    st.markdown(f"**Triage Urgency**: `{st.session_state.get('doc_triage', 'Routine')}`")
+                    st.markdown("**Differential Considerations:**")
+                    for diff in recs.get("differentials", []):
+                        st.markdown(f"- {diff}")
+                with col_sg2:
+                    st.markdown("**Actionable Diagnostic Recommendations:**")
+                    for rec in recs.get("actionable_recommendations", []):
+                        st.markdown(f"- {rec}")
+                    if recs.get("red_flags"):
+                        st.warning(f"**Red Flag Alert**: {', '.join(recs['red_flags'])}")
+
+                # Entity Negation scoping badges
+                ents = st.session_state.get("doc_entities", {})
+                if ents.get("symptoms"):
+                    st.markdown("**Extracted Symptoms & Negation Scoping:**")
+                    s_pills = []
+                    for s in ents["symptoms"]:
+                        badge = "[+ Present]" if s["status"] == "Present" else "[- Denied]"
+                        s_pills.append(f"`{s['entity']} {badge}`")
+                    st.markdown(" ".join(s_pills))
 
         with col_d2:
-            st.subheader("Structured Clinical Fields (Editable Before Saving)")
+            st.subheader("Structured Clinical Fields & Gold-Standard SOAP")
             edit_data = st.session_state.get("doc_structured_edit")
+            soap_det = st.session_state.get("doc_soap_details")
+
             if not edit_data:
-                st.info("Click 'Organize Notes with AI' to generate editable structured fields.")
+                st.info("Enter consultation dialogue on the left and click 'Synthesize Gold-Standard SOAP' to view structured fields, clinical suggestions, and SOAP tabs.")
             else:
+                # Interactive SOAP Tabs
+                soap_tab_s, soap_tab_o, soap_tab_a, soap_tab_p = st.tabs([
+                    "[S] Subjective", "[O] Objective", "[A] Assessment", "[P] Plan"
+                ])
+                with soap_tab_s:
+                    st.markdown(f"**Chief Complaint**: {edit_data.get('chief_complaint')}")
+                    st.markdown(f"**History of Present Illness (HPI)**: {edit_data.get('hpi')}")
+                    st.markdown(f"**Past Medical History (PMH)**: {edit_data.get('pmh')}")
+                with soap_tab_o:
+                    st.markdown(f"**Physical Examination & Vitals**: {edit_data.get('exam')}")
+                    if soap_det:
+                        st.caption(soap_det.get("objective", ""))
+                with soap_tab_a:
+                    st.markdown(f"**Working Diagnosis**: `{edit_data.get('final_diagnosis')}` (ICD-10: `{edit_data.get('icd10')}`)")
+                    st.markdown(f"**Differentials**: {edit_data.get('differential')}")
+                with soap_tab_p:
+                    st.markdown(f"**Ordered Investigations**: {edit_data.get('investigations')}")
+                    st.markdown(f"**Medications / Regimen**: {edit_data.get('medications')}")
+                    st.markdown(f"**Treatment Plan**: {edit_data.get('treatment_plan')}")
+
+                st.markdown("---")
+                st.markdown("##### Review & Edit Structured Fields Before Saving:")
                 with st.form("doctor_review_form"):
                     e_cc = st.text_input("Chief Complaint:", value=edit_data["chief_complaint"])
-                    e_hpi = st.text_area("HPI:", value=edit_data["hpi"], height=60)
-                    e_pmh = st.text_input("PMH:", value=edit_data["pmh"])
-                    e_exam = st.text_input("Physical Exam / Vitals:", value=edit_data["exam"])
-                    e_diag = st.text_input("Preliminary Diagnosis:", value=edit_data["final_diagnosis"])
-                    e_icd = st.text_input("ICD-10 Code:", value=edit_data["icd10"])
+                    e_hpi = st.text_area("HPI Narrative:", value=edit_data["hpi"], height=60)
+                    e_pmh = st.text_input("Past Medical History (PMH):", value=edit_data["pmh"])
+                    e_exam = st.text_input("Physical Exam / Vital Signs:", value=edit_data["exam"])
+                    e_diag = st.text_input("Primary Diagnosis:", value=edit_data["final_diagnosis"])
+                    e_icd = st.text_input("ICD-10 Diagnostic Code:", value=edit_data["icd10"])
                     e_inv = st.text_input("Investigations to Order (Lab/Imaging):", value=edit_data["investigations"])
-                    e_meds = st.text_input("Initial Prescriptions / Meds:", value=edit_data["medications"])
+                    e_meds = st.text_input("Initial Prescriptions / Medications:", value=edit_data["medications"])
                     e_plan = st.text_input("Treatment Plan:", value=edit_data["treatment_plan"])
-                    e_soap = st.text_area("SOAP Note:", value=edit_data["soap_note"], height=70)
+                    e_soap = st.text_area("Comprehensive SOAP Note:", value=edit_data["soap_note"], height=80)
 
                     col_b1, col_b2 = st.columns(2)
                     with col_b1:
