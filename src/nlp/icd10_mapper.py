@@ -44,6 +44,25 @@ class ICD10OntologyMapper:
 
         return None
 
+
+    def map_diagnosis_to_icd10(self, query: str) -> Dict[str, str]:
+        res = self.lookup_diagnosis(query)
+        if res:
+            return {
+                "preferred_label": res["diagnosis"],
+                "icd10_code": res["code"],
+                "category": res["desc"],
+                "medications": res["meds"],
+                "investigations": res["investigations"]
+            }
+        return {
+            "preferred_label": query if query else "Unspecified condition",
+            "icd10_code": "R69",
+            "category": "Unspecified illness",
+            "medications": "Supportive pharmacotherapy",
+            "investigations": "Routine baseline laboratory workup"
+        }
+
     def map_from_narrative(self, narrative_text: str) -> Dict[str, str]:
         """Infers the most likely primary diagnosis and ICD-10 code from clinical narrative text."""
         text_lower = narrative_text.lower()
