@@ -310,7 +310,10 @@ elif "2. Doctor Queue" in portal_choice:
                     soap_res = soap_generator.generate_soap_note(doc_narrative)
                     cleaned_narrative = cleaner.clean_text(doc_narrative)
                     entities_extracted = entity_extractor.extract_all(cleaned_narrative)
-                    pred_spec, triage_lvl = classifier.predict(cleaned_narrative)
+                    clf_res = classifier.predict(cleaned_narrative)
+                    pred_spec = clf_res.get("predicted_specialty", "Internal Medicine")
+                    conf_val = clf_res.get("confidence", 0.85)
+                    triage_lvl = "Urgent (Tier 2)" if conf_val > 0.5 and pred_spec in ["Cardiology", "Pulmonology"] else "Routine (Tier 3)"
                     recs_data = llm_engine.generate_recommendations(entities_extracted, pred_spec)
 
                     st.session_state["doc_structured_edit"] = extracted
