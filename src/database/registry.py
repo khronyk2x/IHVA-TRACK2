@@ -1,3 +1,4 @@
+import re
 import sqlite3
 import os
 import pandas as pd
@@ -501,6 +502,92 @@ class CentralClinicalRegistry:
             ]
 
         return df
+
+
+    def validate_vitals(self, vitals: Dict[str, str]) -> Dict[str, Any]:
+        warnings = []
+        if not vitals:
+            return {"valid": True, "warnings": []}
+
+        # Check Heart Rate
+        if "HR" in vitals:
+            try:
+                hr_val = float(re.sub(r'[^0-9.]', '', str(vitals["HR"])))
+                if hr_val < 20 or hr_val > 250:
+                    warnings.append(f"Heart Rate ({vitals['HR']}) is outside plausible physiological range (20-250 bpm).")
+            except Exception:
+                pass
+
+        # Check Temperature
+        if "Temp" in vitals:
+            try:
+                t_val = float(re.sub(r'[^0-9.]', '', str(vitals["Temp"])))
+                if t_val < 30.0 or t_val > 45.0:
+                    warnings.append(f"Temperature ({vitals['Temp']}) is outside plausible range (30.0-45.0 C).")
+            except Exception:
+                pass
+
+        # Check SpO2
+        if "SpO2" in vitals:
+            try:
+                spo2_val = float(re.sub(r'[^0-9.]', '', str(vitals["SpO2"])))
+                if spo2_val < 40 or spo2_val > 100:
+                    warnings.append(f"SpO2 ({vitals['SpO2']}) is outside valid range (40-100%).")
+            except Exception:
+                pass
+
+        # Check Blood Pressure
+        if "BP" in vitals:
+            if not re.search(r'^\d{2,3}/\d{2,3}', str(vitals["BP"]).strip()):
+                warnings.append(f"Blood Pressure '{vitals['BP']}' format invalid. Expected format e.g. '120/80'.")
+
+        return {"valid": len(warnings) == 0, "warnings": warnings}
+
+    def check_duplicate_intake(self, patient_name: str, age: int, gender: str) -> Optional[Dict[str, Any]]:
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT * FROM patient_encounters 
+                WHERE LOWER(patient_name) = LOWER(?) AND age = ? AND LOWER(gender) = LOWER(?)
+                ORDER BY created_at DESC LIMIT 1
+            ''', (patient_name.strip(), age, gender.strip()))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def merge_encounters(self, primary_encounter_id: str, duplicate_encounter_id: str, staff_name: str = "Admin") -> Dict[str, Any]:
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute('''
+                UPDATE raw_variants 
+                SET source_encounter_id = ? 
+                WHERE source_encounter_id = ?
+            ''', (primary_encounter_id, duplicate_encounter_id))
+
+            cursor.execute('''
+                UPDATE structured_records 
+                SET source_encounter_id = ? 
+                WHERE source_encounter_id = ?
+            ''', (primary_encounter_id, duplicate_encounter_id))
+
+            cursor.execute('''
+                UPDATE patient_encounters 
+                SET status = ? 
+                WHERE encounter_id = ?
+            ''', (f"Merged into {primary_encounter_id}", duplicate_encounter_id))
+
+            cursor.execute('''
+                INSERT INTO audit_logs (record_id, action, editor_name, details)
+                VALUES (?, 'DUPLICATE_MERGE', ?, ?)
+            ''', (primary_encounter_id, staff_name, f"Merged duplicate encounter {duplicate_encounter_id} into {primary_encounter_id}"))
+
+            conn.commit()
+            return {"success": True, "message": f"Successfully merged {duplicate_encounter_id} into {primary_encounter_id}."}
+        finally:
+            conn.close()
 
     def get_encounters_by_doctor(self, doctor_name: str) -> List[Dict[str, Any]]:
         conn = self.get_connection()

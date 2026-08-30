@@ -7,6 +7,7 @@ from src.nlp.organizer_extractor import OrganizerRecordExtractor
 from src.database.registry import CentralClinicalRegistry
 from src.ocr.image_scanner import ClinicalOCRScanner
 from src.audio.transcriber import MultilingualClinicalAudioTranscriber
+from src.utils.exporter import ClinicalDocumentExporter
 
 class TestCentralSystem(unittest.TestCase):
 
@@ -67,6 +68,38 @@ class TestCentralSystem(unittest.TestCase):
         self.assertIn("fever", res["translated_english"])
         self.assertIn("headache", res["translated_english"])
         self.assertIn("chest pain", res["translated_english"])
+
+    def test_fhir_and_pdf_export(self):
+        self.registry.nurse_intake("E0999", "Ibrahim Musa", 42, "Male", {"BP": "130/85", "HR": "84", "Temp": "38.2 C"}, "Acute fever and headache", "Dr. Sarah Smith, MD", "Nurse Amina")
+        card = self.registry.get_care_card("E0999")
+        
+        # FHIR Bundle validation
+        bundle = ClinicalDocumentExporter.to_fhir_bundle(card)
+        self.assertEqual(bundle["resourceType"], "Bundle")
+        self.assertGreaterEqual(bundle["total"], 3)
+
+        # PDF Care Card generation
+        pdf_test_path = "/home/Onahi/Devdir/hack/data/registry/test_card.pdf"
+        ClinicalDocumentExporter.generate_patient_pdf(card, pdf_test_path)
+        self.assertTrue(os.path.exists(pdf_test_path))
+        if os.path.exists(pdf_test_path):
+            os.remove(pdf_test_path)
+
+    def test_vitals_validation_and_merge(self):
+        v_valid = {"BP": "120/80", "HR": "72", "Temp": "37.1 C", "SpO2": "98%"}
+        res_valid = self.registry.validate_vitals(v_valid)
+        self.assertTrue(res_valid["valid"])
+
+        v_invalid = {"BP": "invalid_format", "HR": "320", "Temp": "55.0 C", "SpO2": "15%"}
+        res_invalid = self.registry.validate_vitals(v_invalid)
+        self.assertFalse(res_invalid["valid"])
+        self.assertGreaterEqual(len(res_invalid["warnings"]), 3)
+
+        # Duplicate merge test
+        self.registry.nurse_intake("E0888", "Fatima Aliyu", 28, "Female", v_valid, "Asthma wheezing", "Dr. Sarah Smith, MD")
+        self.registry.nurse_intake("E0889", "Fatima Aliyu", 28, "Female", v_valid, "Asthma wheezing", "Dr. Sarah Smith, MD")
+        m_res = self.registry.merge_encounters("E0888", "E0889")
+        self.assertTrue(m_res["success"])
 
 if __name__ == '__main__':
     unittest.main()

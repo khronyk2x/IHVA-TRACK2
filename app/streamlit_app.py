@@ -626,6 +626,50 @@ elif "4. Patient Care Card" in portal_choice:
         df_vars = pd.DataFrame(all_vars)
         st.dataframe(df_vars, use_container_width=True)
 
+    st.markdown("---")
+    st.subheader("Export & Interoperability Center")
+    c_exp1, c_exp2, c_exp3 = st.columns(3)
+
+    with c_exp1:
+        # Per-Patient PDF Care Card
+        pdf_patient_path = f"/home/Onahi/Devdir/hack/data/registry/care_card_{care_enc}.pdf"
+        os.makedirs(os.path.dirname(pdf_patient_path), exist_ok=True)
+        try:
+            ClinicalDocumentExporter.generate_patient_pdf(care_data, pdf_patient_path)
+            with open(pdf_patient_path, "rb") as f_pdf:
+                st.download_button(
+                    label="Download Patient Care Card (PDF)",
+                    data=f_pdf,
+                    file_name=f"MediScribe_CareCard_{care_enc}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
+        except Exception as e:
+            st.error(f"PDF generation error: {e}")
+
+    with c_exp2:
+        # FHIR R4 Bundle JSON
+        fhir_data = ClinicalDocumentExporter.to_fhir_bundle(care_data)
+        st.download_button(
+            label="Download HL7 FHIR R4 Bundle (JSON)",
+            data=json.dumps(fhir_data, indent=2),
+            file_name=f"FHIR_Bundle_{care_enc}.json",
+            mime="application/json",
+            use_container_width=True
+        )
+
+    with c_exp3:
+        # Standardized 15-column CSV
+        if all_vars:
+            csv_data = df_vars.to_csv(index=False)
+            st.download_button(
+                label="Download 15-Column Schema (CSV)",
+                data=csv_data,
+                file_name=f"CareCard_{care_enc}_15col.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+
 elif "5. Admin & Staff Attendance" in portal_choice:
     st.markdown('<div class="main-header">Administrator Operations & Staff Attendance Hub</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="sub-header">Central oversight of clinical personnel attendance, patient allocations, and system audit logs. Active Admin: <strong>{current_user["name"]}</strong>.</div>', unsafe_allow_html=True)
