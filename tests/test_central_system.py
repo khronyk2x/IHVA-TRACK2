@@ -8,6 +8,7 @@ from src.database.registry import CentralClinicalRegistry
 from src.ocr.image_scanner import ClinicalOCRScanner
 from src.audio.transcriber import MultilingualClinicalAudioTranscriber
 from src.utils.exporter import ClinicalDocumentExporter
+from src.utils.data_auditor import ClinicalDataAuditor
 
 class TestCentralSystem(unittest.TestCase):
 
@@ -100,6 +101,41 @@ class TestCentralSystem(unittest.TestCase):
         self.registry.nurse_intake("E0889", "Fatima Aliyu", 28, "Female", v_valid, "Asthma wheezing", "Dr. Sarah Smith, MD")
         m_res = self.registry.merge_encounters("E0888", "E0889")
         self.assertTrue(m_res["success"])
+
+
+    def test_data_auditor_and_sorting(self):
+        auditor = ClinicalDataAuditor()
+        df_sample = pd.DataFrame([
+            {
+                "id": "T2_0001_V01", "source_encounter_id": "E0001", "variant_id": 1,
+                "clinical_narrative": "Fever for 3 days. Exam: Temp 38.5 C. Diagnosed Malaria. Plan: ACT.",
+                "chief_complaint": "Fever", "hpi": "Fever for 3 days", "pmh": "None", "exam": "Temp 38.5 C",
+                "differential": "Malaria", "final_diagnosis": "Malaria", "icd10": "B54",
+                "investigations": "Malaria RDT", "medications": "Artemether-Lumefantrine 80/480mg PO BID x 3 days",
+                "treatment_plan": "Complete ACT", "soap_note": "S: Fever. O: Temp 38.5 C. A: Malaria. P: ACT."
+            },
+            {
+                "id": "T2_0002_V01", "source_encounter_id": "E0002", "variant_id": 1,
+                "clinical_narrative": "Patient coughing.",
+                "chief_complaint": "", "hpi": "", "pmh": "", "exam": "HR 280",
+                "differential": "", "final_diagnosis": "Asthma", "icd10": "I10",
+                "investigations": "", "medications": "", "treatment_plan": "", "soap_note": ""
+            }
+        ])
+        
+        audit_res = auditor.audit_dataframe(df_sample)
+        self.assertEqual(audit_res["total_records"], 2)
+        self.assertEqual(audit_res["clean_records"], 1)
+        self.assertEqual(audit_res["critical_records"], 1)
+
+        # Test Sorting & Filtering
+        filtered_df = auditor.sort_and_filter(audit_res["audited_df"], sort_by="Quality_Score", ascending=True)
+        self.assertEqual(filtered_df.iloc[0]["id"], "T2_0002_V01")
+
+        # Test Auto-rectification
+        rectified_df = auditor.auto_rectify_dataframe(df_sample)
+        self.assertEqual(len(rectified_df), 2)
+        self.assertEqual(rectified_df.iloc[1]["icd10"], "J45.9")
 
 if __name__ == '__main__':
     unittest.main()

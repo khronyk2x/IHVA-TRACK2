@@ -21,6 +21,7 @@ from src.ocr.image_scanner import ClinicalOCRScanner
 from src.audio.transcriber import MultilingualClinicalAudioTranscriber
 from src.utils.sample_cases import SAMPLE_CASES
 from src.utils.exporter import ClinicalDocumentExporter
+from src.utils.data_auditor import ClinicalDataAuditor
 
 st.set_page_config(
     page_title="MediScribe AI - Clinical Care Card & Central Registry",
@@ -69,9 +70,10 @@ def load_nlp_components():
     org_extractor = OrganizerRecordExtractor()
     ocr_scanner = ClinicalOCRScanner()
     audio_transcriber = MultilingualClinicalAudioTranscriber()
-    return cleaner, extractor, generator, classifier, llm_engine, icd_mapper, org_extractor, ocr_scanner, audio_transcriber
+    data_auditor = ClinicalDataAuditor()
+    return cleaner, extractor, generator, classifier, llm_engine, icd_mapper, org_extractor, ocr_scanner, audio_transcriber, data_auditor
 
-cleaner, extractor, generator, classifier, llm_engine, icd_mapper, org_extractor, ocr_scanner, audio_transcriber = load_nlp_components()
+cleaner, extractor, generator, classifier, llm_engine, icd_mapper, org_extractor, ocr_scanner, audio_transcriber, data_auditor = load_nlp_components()
 soap_generator = generator
 entity_extractor = extractor
 
@@ -821,91 +823,190 @@ elif "6. Central Database" in portal_choice:
                                 st.rerun()
 
 elif "7. Bulk Import" in portal_choice:
-    st.markdown('<div class="main-header">Bulk Data Ingestion & Export Center</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-header">Upload multi-patient spreadsheets with auto-structuring, and export 15-column files matching track2_organizer_dataset.csv.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header">Bulk Ingestion, Sorting & Clinical Quality Audit Center</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-header">Automated data collection, lapse detection, ICD-10 coding audits, multi-column sorting, and 1-click AI rectification.</div>', unsafe_allow_html=True)
 
-    tab_import, tab_export, tab_audit = st.tabs(["Bulk Data Import", "Universal Data Export", "System Audit Logs"])
+    tab_audit_inspect, tab_collection, tab_export_uni, tab_audit_log = st.tabs([
+        "Data Quality & Lapse Audit",
+        "Data Collection & Upload",
+        "Universal 15-Column Export",
+        "System Audit Trail"
+    ])
 
-    with tab_import:
-        st.subheader("Bulk Import Clinical Reports (CSV or Excel)")
-        sample_btn = st.button("Load Organizer Dataset Sample (500 records from track2_organizer_dataset.csv)", type="secondary")
-        if sample_btn:
-            organizer_path = "/home/Onahi/Devdir/hack/data/raw/track2_organizer_dataset.csv"
-            if os.path.exists(organizer_path):
-                with st.spinner("Importing records..."):
-                    df_sample = pd.read_csv(organizer_path).head(500)
-                    count = registry.bulk_import_dataframe(df_sample, author_name=current_user["name"], author_role=current_user["role"])
-                    st.success(f"Successfully loaded {count} records into Central Database!")
-                    st.rerun()
-
-        st.markdown("---")
-        up_f = st.file_uploader("Upload custom CSV/Excel:", type=["csv", "xlsx", "xls"])
-        if up_f:
-            df_up = pd.read_csv(up_f) if up_f.name.endswith(".csv") else pd.read_excel(up_f)
-            st.dataframe(df_up.head(5), use_container_width=True)
-            if st.button(f"Confirm & Ingest All {len(df_up)} Records", type="primary"):
-                count = registry.bulk_import_dataframe(df_up, author_name=current_user["name"], author_role=current_user["role"])
-                st.success(f"Ingested {count} records!")
-                st.rerun()
-
-    with tab_export:
-        st.subheader("Universal 15-Column Export")
-        df_all = registry.get_all_records_df()
-        st.download_button(
-            label="Download Standardized 15-Column CSV",
-            data=df_all.to_csv(index=False).encode('utf-8'),
-            file_name="central_clinical_registry_export.csv",
-            mime="text/csv",
-            type="primary",
-            use_container_width=True
-        )
-
-    with tab_audit:
-        st.subheader("Database Audit Trail")
-        st.dataframe(registry.get_audit_logs_df(), use_container_width=True)
-
-elif "8. Clinical Guidance" in portal_choice:
-    st.markdown('<div class="main-header">Clinical Guidance & Case Recall Assistant</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-header">Interactive assistant for disease definitions, treatment guidelines, and Central Database record recall.</div>', unsafe_allow_html=True)
-
-    for msg in st.session_state["chat_history"]:
-        if msg["role"] == "user":
-            st.chat_message("user").write(msg["content"])
+    # Persistent session state for ingested / audited data
+    if "audited_dataset" not in st.session_state or st.session_state["audited_dataset"] is None:
+        organizer_raw = "/home/Onahi/Devdir/hack/data/raw/track2_organizer_dataset.csv"
+        if os.path.exists(organizer_raw):
+            try:
+                st.session_state["audited_dataset"] = pd.read_csv(organizer_raw).head(500)
+            except Exception:
+                st.session_state["audited_dataset"] = registry.get_all_records_df()
         else:
-            st.chat_message("assistant").write(msg["content"])
+            st.session_state["audited_dataset"] = registry.get_all_records_df()
 
-    user_query = st.chat_input("Ask a clinical question or recall an encounter (e.g. 'Recall encounter E0001'):")
-    if user_query:
-        st.session_state["chat_history"].append({"role": "user", "content": user_query})
-        st.chat_message("user").write(user_query)
+    df_current = st.session_state["audited_dataset"]
 
-        q_low = user_query.lower()
-        if "recall" in q_low or "e00" in q_low:
-            df_all = registry.get_all_records_df()
-            matched = False
-            for enc_val in df_all["source_encounter_id"].unique():
-                if enc_val.lower() in q_low:
-                    rows = df_all[df_all["source_encounter_id"] == enc_val]
-                    bot_reply = f"**Found {len(rows)} report variant(s) for Encounter {enc_val}:**\n\n"
-                    for _, r in rows.iterrows():
-                        bot_reply += f"- **Variant {r['variant_id']} (Type: {r.get('report_type', 'Note')})**: Diagnosis: `{r['final_diagnosis']}` (ICD-10: `{r['icd10']}`)\n  - *SOAP*: {r['soap_note']}\n\n"
-                    matched = True
-                    break
-            if not matched:
-                bot_reply = "I checked the Central Database. Could you please specify the exact Encounter ID (e.g. E0001, E0010)?"
-        elif "malaria" in q_low:
-            bot_reply = "**Malaria Clinical Protocol (ICD-10: B54)**:\n- *Case Definition*: Acute fever with positive RDT/microscopy.\n- *Treatment*: Artemisinin-based Combination Therapy (ACT).\n- *Red Flags*: Impaired consciousness, severe anemia, respiratory distress."
+    # TAB 1: DATA QUALITY & LAPSE AUDIT
+    with tab_audit_inspect:
+        st.subheader("Automated Clinical Quality & Documentation Lapse Audit")
+        
+        if df_current is None or df_current.empty:
+            st.info("No data currently loaded. Please upload a dataset in the 'Data Collection & Upload' tab.")
         else:
-            bot_reply = f"Clinical query received: '{user_query}'. Ensure all vitals and negative findings are documented."
+            with st.spinner("Executing rule-based clinical audit across all records..."):
+                audit_res = data_auditor.audit_dataframe(df_current)
 
-        st.session_state["chat_history"].append({"role": "assistant", "content": bot_reply})
-        st.chat_message("assistant").write(bot_reply)
+            audited_df = audit_res["audited_df"]
+            avg_score = audit_res["average_quality_score"]
 
-st.markdown('''
-<div class="mobile-bottom-nav">
-    <div class="nav-item">Nurse</div>
-    <div class="nav-item">Doctor</div>
-    <div class="nav-item">Lab</div>
-    <div class="nav-item">Care Card</div>
-</div>
-''', unsafe_allow_html=True)
+            # Visual KPI Cards
+            kpi_col1, kpi_col2, kpi_col3, kpi_col4, kpi_col5 = st.columns(5)
+            with kpi_col1:
+                st.metric("Total Records", audit_res["total_records"])
+            with kpi_col2:
+                st.metric("Average Quality Score", f"{avg_score}%")
+            with kpi_col3:
+                st.metric("100% Clean Records", audit_res["clean_records"])
+            with kpi_col4:
+                st.metric("Minor Warnings / Gaps", audit_res["warning_records"])
+            with kpi_col5:
+                st.metric("Critical Coding Lapses", audit_res["critical_records"])
+
+            st.markdown("---")
+
+            # Sorting & Multi-Column Filtering Controls
+            st.markdown("##### Advanced Sorting & Search Controls")
+            c_s1, c_s2, c_s3, c_s4 = st.columns([1.5, 1, 1.2, 1.5])
+            with c_s1:
+                sort_col = st.selectbox(
+                    "Sort Records By:",
+                    ["Quality_Score", "Lapse_Count", "source_encounter_id", "final_diagnosis", "icd10", "variant_id"],
+                    index=0
+                )
+            with c_s2:
+                sort_order = st.radio("Order:", ["Ascending (Lowest First)", "Descending (Highest First)"], horizontal=True)
+                asc_flag = True if "Ascending" in sort_order else False
+            with c_s3:
+                sev_filter = st.selectbox("Filter by Severity:", ["All", "Critical Lapse", "Minor Warning", "Clean"])
+            with c_s4:
+                search_kw = st.text_input("Live Keyword Search:", placeholder="Filter by patient, condition, drug...")
+
+            min_score_slider = st.slider("Minimum Quality Score Threshold (%):", min_value=0, max_value=100, value=0)
+
+            # Apply sorting & filtering
+            display_df = data_auditor.sort_and_filter(
+                audited_df,
+                sort_by=sort_col,
+                ascending=asc_flag,
+                severity_filter=sev_filter,
+                search_query=search_kw,
+                min_quality_score=min_score_slider
+            )
+
+            st.markdown(f"**Showing {len(display_df)} of {len(audited_df)} Audited Records**")
+
+            # 1-Click AI Auto-Rectification Action
+            col_act1, col_act2 = st.columns([1.5, 1])
+            with col_act1:
+                if st.button("Auto-Rectify & Impute All Identified Lapses with AI", type="primary", use_container_width=True):
+                    with st.spinner("Applying Clinical NLP & Ontology Structuring to fix missing fields and coding errors..."):
+                        rectified = data_auditor.auto_rectify_dataframe(df_current)
+                        st.session_state["audited_dataset"] = rectified
+                        # Ingest into DB
+                        registry.bulk_import_dataframe(rectified, author_name=current_user["name"], author_role=current_user["role"])
+                        st.success("Successfully rectified all documentation lapses and updated Central Clinical Registry!")
+                        st.rerun()
+            with col_act2:
+                if st.button("Reload Original Benchmark Sample", use_container_width=True):
+                    org_path = "/home/Onahi/Devdir/hack/data/raw/track2_organizer_dataset.csv"
+                    if os.path.exists(org_path):
+                        st.session_state["audited_dataset"] = pd.read_csv(org_path).head(500)
+                        st.rerun()
+
+            st.dataframe(
+                display_df[[
+                    "id", "source_encounter_id", "Quality_Score", "Severity", "Lapse_Count",
+                    "Lapses_Detected", "final_diagnosis", "icd10", "medications", "soap_note"
+                ]],
+                use_container_width=True,
+                height=350
+            )
+
+    # TAB 2: DATA COLLECTION & FILE UPLOAD
+    with tab_collection:
+        st.subheader("Data Ingestion & Multi-Format Clinical Importer")
+        st.caption("Upload multi-patient spreadsheets (CSV or Excel). The system automatically runs pre-ingestion audit checks.")
+
+        up_file = st.file_uploader("Upload Clinical File (CSV or Excel):", type=["csv", "xlsx", "xls"], key="p7_file_uploader")
+        if up_file:
+            try:
+                if up_file.name.endswith(".csv"):
+                    df_uploaded = pd.read_csv(up_file)
+                else:
+                    df_uploaded = pd.read_excel(up_file)
+
+                st.success(f"File '{up_file.name}' loaded ({len(df_uploaded)} rows, {len(df_uploaded.columns)} columns).")
+                
+                # Pre-ingestion audit preview
+                preview_audit = data_auditor.audit_dataframe(df_uploaded)
+                st.markdown(f"**Pre-Ingestion Quality Score:** `{preview_audit['average_quality_score']}%` | **Critical Lapses:** `{preview_audit['critical_records']}`")
+
+                st.dataframe(preview_audit["audited_df"].head(10), use_container_width=True)
+
+                col_u1, col_u2 = st.columns(2)
+                with col_u1:
+                    if st.button(f"Direct Ingest All {len(df_uploaded)} Records to Central Database", type="primary", use_container_width=True):
+                        cnt = registry.bulk_import_dataframe(df_uploaded, author_name=current_user["name"], author_role=current_user["role"])
+                        st.session_state["audited_dataset"] = df_uploaded
+                        st.success(f"Ingested {cnt} records into Central Registry!")
+                        st.rerun()
+                with col_u2:
+                    if st.button("Auto-Rectify Lapses Before Ingestion", type="secondary", use_container_width=True):
+                        with st.spinner("Auto-rectifying uploaded data..."):
+                            df_rec = data_auditor.auto_rectify_dataframe(df_uploaded)
+                            cnt = registry.bulk_import_dataframe(df_rec, author_name=current_user["name"], author_role=current_user["role"])
+                            st.session_state["audited_dataset"] = df_rec
+                            st.success(f"Rectified & Ingested {cnt} records at 100% data quality!")
+                            st.rerun()
+            except Exception as ex:
+                st.error(f"Error parsing uploaded file: {ex}")
+
+    # TAB 3: UNIVERSAL 15-COLUMN EXPORT
+    with tab_export_uni:
+        st.subheader("Universal 15-Column Schema Export")
+        st.caption("One-click download of the complete standardized clinical database matching track2_organizer_dataset.csv.")
+
+        df_export = registry.get_all_records_df()
+        st.markdown(f"**Total Records Available for Export:** `{len(df_export)}`")
+
+        col_ex1, col_ex2 = st.columns(2)
+        with col_ex1:
+            csv_exp = df_export.to_csv(index=False)
+            st.download_button(
+                label="Download Full 15-Column Dataset (CSV)",
+                data=csv_exp,
+                file_name="MediScribe_Universal_15Column_Dataset.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        with col_ex2:
+            json_exp = df_export.to_json(orient="records", indent=2)
+            st.download_button(
+                label="Download Full Clinical Dataset (JSON)",
+                data=json_exp,
+                file_name="MediScribe_Clinical_Ledger.json",
+                mime="application/json",
+                use_container_width=True
+            )
+
+    # TAB 4: SYSTEM AUDIT LOGS
+    with tab_audit_log:
+        st.subheader("Tamper-Proof System Audit Trail")
+        st.caption("Immutable log of all clinician creations, edits, deletions, duplicate merges, and bulk ingestions.")
+        
+        audit_records = registry.get_audit_logs()
+        if not audit_records:
+            st.info("No audit events recorded yet.")
+        else:
+            df_logs = pd.DataFrame(audit_records)
+            st.dataframe(df_logs, use_container_width=True)
