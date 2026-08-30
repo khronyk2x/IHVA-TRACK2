@@ -279,7 +279,7 @@ class CentralClinicalRegistry:
 
             cursor.execute('''
                 UPDATE patient_encounters SET
-                    status = 'Completed',
+                    status = 'Results Ready for Doctor Review',
                     lab_results = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE encounter_id = ?
@@ -327,6 +327,91 @@ class CentralClinicalRegistry:
 
             conn.commit()
             return {"record_id": record_id, "status": "Completed"}
+        finally:
+            conn.close()
+
+
+    def get_encounters_ready_for_doctor_review(self, doctor_name: str) -> List[Dict[str, Any]]:
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT * FROM patient_encounters 
+                WHERE status = 'Results Ready for Doctor Review'
+                  AND (assigned_doctor = ? OR assigned_doctor LIKE ?)
+            ''', (doctor_name, f"%{doctor_name.split()[0]}%"))
+            return [dict(r) for r in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def doctor_finalize_encounter(
+        self,
+        encounter_id: str,
+        final_diagnosis: str,
+        final_icd10: str,
+        final_medications: str,
+        final_treatment_plan: str,
+        final_soap_note: str,
+        discharge_disposition: str = "Discharged Home with Prescription",
+        doctor_name: str = "Dr. Sarah Smith, MD"
+    ) -> Dict[str, Any]:
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+
+            cursor.execute("SELECT MAX(variant_id) FROM raw_variants WHERE source_encounter_id = ?", (encounter_id,))
+            max_v = cursor.fetchone()[0]
+            next_variant = 4 if max_v is None else max_v + 1
+            record_id = f"T2_{encounter_id.replace('E', '')}_V{str(next_variant).zfill(2)}"
+
+            cursor.execute('''
+                UPDATE patient_encounters SET
+                    status = 'Completed / Finalized',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE encounter_id = ?
+            ''', (encounter_id,))
+
+            final_narrative = f"Finalized by {doctor_name}. Diagnosis: {final_diagnosis} (ICD-10: {final_icd10}). Disposition: {discharge_disposition}. Plan: {final_treatment_plan}."
+
+            cursor.execute('''
+                INSERT INTO raw_variants (id, source_encounter_id, variant_id, author_role, author_name, stage, clinical_narrative)
+                VALUES (?, ?, ?, 'Attending Physician', ?, 'Final Sign-off', ?)
+            ''', (record_id, encounter_id, next_variant, doctor_name, final_narrative))
+
+            cursor.execute('''
+                SELECT * FROM structured_records 
+                WHERE source_encounter_id = ? 
+                ORDER BY variant_id DESC LIMIT 1
+            ''', (encounter_id,))
+            prev_note = cursor.fetchone()
+
+            cc = prev_note["chief_complaint"] if prev_note else "Clinical Evaluation"
+            hpi = prev_note["hpi"] if prev_note else ""
+            pmh = prev_note["pmh"] if prev_note else ""
+            exam = prev_note["exam"] if prev_note else ""
+            inv = prev_note["investigations"] if prev_note else ""
+
+            cursor.execute('''
+                INSERT INTO structured_records (
+                    id, source_encounter_id, variant_id, author_name, author_role, clinical_narrative,
+                    chief_complaint, hpi, pmh, exam, differential,
+                    final_diagnosis, icd10, investigations, medications,
+                    treatment_plan, soap_note, report_type
+                ) VALUES (?, ?, ?, ?, 'Attending Physician', ?, ?, ?, ?, ?, 'Confirmed following laboratory testing and physician sign-off', ?, ?, ?, ?, ?, ?, 'Finalized Care Card')
+            ''', (
+                record_id, encounter_id, next_variant, doctor_name,
+                final_narrative, cc, hpi, pmh, exam,
+                final_diagnosis, final_icd10, inv, final_medications,
+                final_treatment_plan, final_soap_note
+            ))
+
+            cursor.execute('''
+                INSERT INTO audit_logs (record_id, action, editor_name, details)
+                VALUES (?, 'FINAL_SIGNOFF', ?, ?)
+            ''', (record_id, doctor_name, f"Encounter finalized: {final_diagnosis} ({final_icd10}). Disposition: {discharge_disposition}"))
+
+            conn.commit()
+            return {"record_id": record_id, "status": "Completed / Finalized"}
         finally:
             conn.close()
 

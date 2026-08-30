@@ -217,134 +217,225 @@ if "1. Nurse Intake" in portal_choice:
         st.dataframe(df_all_rec[["id", "source_encounter_id", "author_name", "author_role", "chief_complaint", "updated_at"]].head(10), use_container_width=True)
 
 elif "2. Doctor Queue" in portal_choice:
-    st.markdown('<div class="main-header">Doctor Consultation & Investigation Portal</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="sub-header">Step 2: Authenticated as <strong>{current_user["name"]}</strong>. Review assigned patients, dictate/type notes, and organize via AI.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header">Doctor Consultation & Lab Review Hub</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="sub-header">Authenticated as <strong>{current_user["name"]}</strong> ({current_user["role"]}). Examine new patients, review returned lab results, and finalize Care Cards.</div>', unsafe_allow_html=True)
 
-    c_q1, c_q2 = st.columns([1, 1])
-    with c_q1:
-        queue_filter = st.radio("Queue Filter:", ["My Assigned Patients", "All Active Encounters"], horizontal=True)
+    tab_doc_initial, tab_doc_lab_review = st.tabs([
+        "Active Consultation & Initial Exam",
+        "Returned Lab Results & Final Sign-Off"
+    ])
 
-    if queue_filter == "My Assigned Patients":
-        assigned_encounters = registry.get_encounters_by_doctor(current_user["name"])
-    else:
-        df_all = registry.get_all_records_df()
-        assigned_encounters = [{"encounter_id": e, "patient_name": f"Patient {e}", "status": "Active"} for e in df_all["source_encounter_id"].unique()[:20]] if not df_all.empty else []
+    with tab_doc_initial:
+        st.subheader("Step 2A: New Patient Clinical Consultation")
+        c_q1, c_q2 = st.columns([1, 1])
+        with c_q1:
+            queue_filter = st.radio("Queue Filter:", ["My Assigned Patients", "All Active Encounters"], horizontal=True, key="doc_q_filter")
 
-    if not assigned_encounters:
-        st.info(f"No active patients currently in your queue. (Patients assigned to {current_user['name']} will appear here).")
-        selected_enc = st.selectbox("Select an existing Encounter ID for demonstration:", ["E0001", "E0002", "E0003"])
-        p_name_val = "Robert Miller"
-    else:
-        enc_options = [f"{e['encounter_id']} - {e['patient_name']} (Status: {e.get('status', 'Active')})" for e in assigned_encounters]
-        chosen_enc_str = st.selectbox("Select Patient to Examine:", enc_options)
-        selected_enc = chosen_enc_str.split(" - ")[0]
-        p_match = next((e for e in assigned_encounters if e["encounter_id"] == selected_enc), None)
-        p_name_val = p_match["patient_name"] if p_match else "Patient"
-
-    st.markdown("---")
-    col_d1, col_d2 = st.columns([1, 1.25])
-
-    with col_d1:
-        st.subheader(f"Encounter: {selected_enc} - {p_name_val}")
-
-        st.markdown("**Capture Tools (Click to Engage):**")
-        c_o, c_v = st.columns(2)
-        with c_o:
-            if st.button("Camera / OCR Document", use_container_width=True):
-                st.session_state["show_ocr_drawer"] = not st.session_state["show_ocr_drawer"]
-        with c_v:
-            if st.button("Hausa / English Voice", use_container_width=True):
-                st.session_state["show_audio_drawer"] = not st.session_state["show_audio_drawer"]
-
-        if st.session_state.get("show_ocr_drawer"):
-            with st.container():
-                st.markdown("##### Document & Prescription Scanner")
-                cam_mode = st.radio("Camera Mode:", ["Rear Camera (Default for Docs)", "Front Camera", "Upload JPG/PNG"], horizontal=True, key="doc_cam_mode")
-                img_c = None
-                if "Rear" in cam_mode or "Front" in cam_mode:
-                    img_c = st.camera_input("Capture Document Photo:", key="doc_cam_stream")
-                else:
-                    img_c = st.file_uploader("Upload Document File:", type=["jpg", "png", "jpeg"], key="doc_file_up")
-
-                if img_c:
-                    with st.spinner("Extracting text via OCR..."):
-                        ocr_res = ocr_scanner.scan_image(img_c)
-                        if ocr_res["success"]:
-                            st.session_state["transcript_text"] = ocr_res["text"]
-                            st.session_state["show_ocr_drawer"] = False
-                            st.success("Extracted text transferred to narrative input!")
-                            st.rerun()
-
-        if st.session_state.get("show_audio_drawer"):
-            with st.container():
-                st.markdown("##### Speech-to-Text with Hausa Clinical Translation")
-                if st.button("Simulate Hausa Doctor-Patient Dialogue", use_container_width=True):
-                    aud_res = audio_transcriber.transcribe_audio(None, language="Hausa")
-                    st.session_state["transcript_text"] = aud_res["english_transcript"]
-                    st.session_state["show_audio_drawer"] = False
-                    st.success("Transcribed and translated into clinical English!")
-                    st.rerun()
-
-        doc_narrative = st.text_area(
-            "Physician Consultation Notes & Dialogue:",
-            value=st.session_state["transcript_text"],
-            height=260,
-            key="doc_narrative_box"
-        )
-
-        if st.button("Organize Notes with AI", type="primary", use_container_width=True):
-            with st.spinner("AI organizing raw notes into structured 15-column schema..."):
-                extracted = org_extractor.extract_record(doc_narrative, encounter_id=selected_enc)
-                st.session_state["doc_structured_edit"] = extracted
-                st.success("AI organization complete. Review and edit structured fields on the right!")
-
-    with col_d2:
-        st.subheader("Structured Clinical Fields (Editable Before Saving)")
-        edit_data = st.session_state.get("doc_structured_edit")
-        if not edit_data:
-            st.info("Click 'Organize Notes with AI' to generate editable structured fields.")
+        if queue_filter == "My Assigned Patients":
+            if hasattr(registry, "get_encounters_by_doctor"):
+                assigned_encounters = registry.get_encounters_by_doctor(current_user["name"])
+            else:
+                assigned_encounters = []
         else:
-            with st.form("doctor_review_form"):
-                e_cc = st.text_input("Chief Complaint:", value=edit_data["chief_complaint"])
-                e_hpi = st.text_area("HPI:", value=edit_data["hpi"], height=60)
-                e_pmh = st.text_input("PMH:", value=edit_data["pmh"])
-                e_exam = st.text_input("Physical Exam / Vitals:", value=edit_data["exam"])
-                e_diag = st.text_input("Preliminary Diagnosis:", value=edit_data["final_diagnosis"])
-                e_icd = st.text_input("ICD-10 Code:", value=edit_data["icd10"])
-                e_inv = st.text_input("Investigations to Order (Lab/Imaging):", value=edit_data["investigations"])
-                e_meds = st.text_input("Initial Prescriptions / Meds:", value=edit_data["medications"])
-                e_plan = st.text_input("Treatment Plan:", value=edit_data["treatment_plan"])
-                e_soap = st.text_area("SOAP Note:", value=edit_data["soap_note"], height=70)
+            df_all = registry.get_all_records_df()
+            assigned_encounters = [{"encounter_id": e, "patient_name": f"Patient {e}", "status": "Active"} for e in df_all["source_encounter_id"].unique()[:20]] if not df_all.empty else []
 
-                col_b1, col_b2 = st.columns(2)
-                with col_b1:
-                    send_lab_btn = st.form_submit_button("Send Patient to Lab for Tests", type="primary", use_container_width=True)
-                with col_b2:
-                    save_direct_btn = st.form_submit_button("Save Notes & Complete Encounter", type="secondary", use_container_width=True)
+        if not assigned_encounters:
+            st.info(f"No active patients currently in your queue. (Patients assigned to {current_user['name']} will appear here).")
+            selected_enc = st.selectbox("Select an existing Encounter ID for demonstration:", ["E0001", "E0002", "E0003"], key="doc_demo_sel")
+            p_name_val = "Robert Miller"
+        else:
+            enc_options = [f"{e['encounter_id']} - {e['patient_name']} (Status: {e.get('status', 'Active')})" for e in assigned_encounters]
+            chosen_enc_str = st.selectbox("Select Patient to Examine:", enc_options, key="doc_chosen_sel")
+            selected_enc = chosen_enc_str.split(" - ")[0]
+            p_match = next((e for e in assigned_encounters if e["encounter_id"] == selected_enc), None)
+            p_name_val = p_match["patient_name"] if p_match else "Patient"
 
-                if send_lab_btn or save_direct_btn:
-                    save_payload = {
-                        "clinical_narrative": doc_narrative,
-                        "chief_complaint": e_cc,
-                        "hpi": e_hpi,
-                        "pmh": e_pmh,
-                        "exam": e_exam,
-                        "differential": edit_data.get("differential", ""),
-                        "final_diagnosis": e_diag,
-                        "icd10": e_icd,
-                        "investigations": e_inv,
-                        "medications": e_meds,
-                        "treatment_plan": e_plan,
-                        "soap_note": e_soap
-                    }
-                    to_lab = True if send_lab_btn else False
-                    res = registry.doctor_submit_investigation(
-                        encounter_id=selected_enc,
-                        structured_data=save_payload,
-                        send_to_lab=to_lab,
-                        doctor_name=current_user["name"]
-                    )
-                    st.success(f"Investigation saved! Status: {res['status']}. Available on Patient Care Card.")
+        st.markdown("---")
+        col_d1, col_d2 = st.columns([1, 1.25])
+
+        with col_d1:
+            st.subheader(f"Encounter: {selected_enc} - {p_name_val}")
+
+            st.markdown("**Capture Tools (Click to Engage):**")
+            c_o, c_v = st.columns(2)
+            with c_o:
+                if st.button("Camera / OCR Document", use_container_width=True, key="btn_ocr_d"):
+                    st.session_state["show_ocr_drawer"] = not st.session_state["show_ocr_drawer"]
+            with c_v:
+                if st.button("Hausa / English Voice", use_container_width=True, key="btn_aud_d"):
+                    st.session_state["show_audio_drawer"] = not st.session_state["show_audio_drawer"]
+
+            if st.session_state.get("show_ocr_drawer"):
+                with st.container():
+                    st.markdown("##### Document & Prescription Scanner")
+                    cam_mode = st.radio("Camera Mode:", ["Rear Camera (Default for Docs)", "Front Camera", "Upload JPG/PNG"], horizontal=True, key="doc_cam_mode")
+                    img_c = None
+                    if "Rear" in cam_mode or "Front" in cam_mode:
+                        img_c = st.camera_input("Capture Document Photo:", key="doc_cam_stream")
+                    else:
+                        img_c = st.file_uploader("Upload Document File:", type=["jpg", "png", "jpeg"], key="doc_file_up")
+
+                    if img_c:
+                        with st.spinner("Extracting text via OCR..."):
+                            ocr_res = ocr_scanner.scan_image(img_c)
+                            if ocr_res["success"]:
+                                st.session_state["transcript_text"] = ocr_res["text"]
+                                st.session_state["show_ocr_drawer"] = False
+                                st.success("Extracted text transferred to narrative input!")
+                                st.rerun()
+
+            if st.session_state.get("show_audio_drawer"):
+                with st.container():
+                    st.markdown("##### Speech-to-Text with Hausa Clinical Translation")
+                    if st.button("Simulate Hausa Doctor-Patient Dialogue", use_container_width=True, key="btn_sim_hausa_d"):
+                        aud_res = audio_transcriber.transcribe_audio(None, language="Hausa")
+                        st.session_state["transcript_text"] = aud_res["english_transcript"]
+                        st.session_state["show_audio_drawer"] = False
+                        st.success("Transcribed and translated into clinical English!")
+                        st.rerun()
+
+            doc_narrative = st.text_area(
+                "Physician Consultation Notes & Dialogue:",
+                value=st.session_state["transcript_text"],
+                height=260,
+                key="doc_narrative_box"
+            )
+
+            if st.button("Synthesize Gold-Standard SOAP & 15-Column Care Card", type="primary", use_container_width=True, key="btn_org_ai_d"):
+                with st.spinner("Synthesizing Gold-Standard SOAP Note & 15-Column Clinical Care Card..."):
+                    extracted = org_extractor.extract_record(doc_narrative, encounter_id=selected_enc)
+                    st.session_state["doc_structured_edit"] = extracted
+                    st.success("Gold-Standard SOAP & 15-Column structuring complete! Review and edit fields on the right.")
+
+        with col_d2:
+            st.subheader("Structured Clinical Fields (Editable Before Saving)")
+            edit_data = st.session_state.get("doc_structured_edit")
+            if not edit_data:
+                st.info("Click 'Organize Notes with AI' to generate editable structured fields.")
+            else:
+                with st.form("doctor_review_form"):
+                    e_cc = st.text_input("Chief Complaint:", value=edit_data["chief_complaint"])
+                    e_hpi = st.text_area("HPI:", value=edit_data["hpi"], height=60)
+                    e_pmh = st.text_input("PMH:", value=edit_data["pmh"])
+                    e_exam = st.text_input("Physical Exam / Vitals:", value=edit_data["exam"])
+                    e_diag = st.text_input("Preliminary Diagnosis:", value=edit_data["final_diagnosis"])
+                    e_icd = st.text_input("ICD-10 Code:", value=edit_data["icd10"])
+                    e_inv = st.text_input("Investigations to Order (Lab/Imaging):", value=edit_data["investigations"])
+                    e_meds = st.text_input("Initial Prescriptions / Meds:", value=edit_data["medications"])
+                    e_plan = st.text_input("Treatment Plan:", value=edit_data["treatment_plan"])
+                    e_soap = st.text_area("SOAP Note:", value=edit_data["soap_note"], height=70)
+
+                    col_b1, col_b2 = st.columns(2)
+                    with col_b1:
+                        send_lab_btn = st.form_submit_button("Send Patient to Lab for Tests", type="primary", use_container_width=True)
+                    with col_b2:
+                        save_direct_btn = st.form_submit_button("Save Notes & Complete Encounter", type="secondary", use_container_width=True)
+
+                    if send_lab_btn or save_direct_btn:
+                        save_payload = {
+                            "clinical_narrative": doc_narrative,
+                            "chief_complaint": e_cc,
+                            "hpi": e_hpi,
+                            "pmh": e_pmh,
+                            "exam": e_exam,
+                            "differential": edit_data.get("differential", ""),
+                            "final_diagnosis": e_diag,
+                            "icd10": e_icd,
+                            "investigations": e_inv,
+                            "medications": e_meds,
+                            "treatment_plan": e_plan,
+                            "soap_note": e_soap
+                        }
+                        to_lab = True if send_lab_btn else False
+                        res = registry.doctor_submit_investigation(
+                            encounter_id=selected_enc,
+                            structured_data=save_payload,
+                            send_to_lab=to_lab,
+                            doctor_name=current_user["name"]
+                        )
+                        st.success(f"Investigation saved! Status: {res['status']}. Patient forwarded to Lab Queue.")
+
+    # TAB 2: LAB RESULTS REVIEW & FINAL SIGN-OFF
+    with tab_doc_lab_review:
+        st.subheader("Step 2B: Review Returned Lab Results & Final Decision Support")
+        st.caption("Inspect laboratory findings, view AI diagnostic suggestions, update Care Card, and finalize the patient encounter.")
+
+        if hasattr(registry, "get_encounters_ready_for_doctor_review"):
+            ready_for_review = registry.get_encounters_ready_for_doctor_review(current_user["name"])
+        else:
+            ready_for_review = []
+
+        if not ready_for_review:
+            st.info(f"No returned lab results pending your review right now. (When the lab files results for your patients, they appear here).")
+            rev_enc_choice = st.selectbox("Select encounter to inspect returned results for demonstration:", ["E0001", "E0100", "E0002"], key="rev_demo_sel")
+        else:
+            st.markdown(f"**Patients with Returned Lab Results ({len(ready_for_review)}):**")
+            rev_options = [f"{e['encounter_id']} - {e['patient_name']}" for e in ready_for_review]
+            rev_choice_str = st.selectbox("Select Patient to Review Lab Results:", rev_options, key="rev_choice_sel")
+            rev_enc_choice = rev_choice_str.split(" - ")[0]
+
+        care_card_data = registry.get_care_card(rev_enc_choice)
+        e_meta = care_card_data.get("encounter", {})
+        i_inv = care_card_data.get("initial_investigation", {})
+        u_rep = care_card_data.get("updated_report", {})
+
+        st.markdown("---")
+        # Top comparison summary
+        c_r1, c_r2 = st.columns(2)
+        with c_r1:
+            st.markdown("##### Doctor Initial Notes (Pre-Lab)")
+            if i_inv:
+                st.info(f"**Preliminary Diagnosis**: `{i_inv.get('final_diagnosis')}` (ICD-10: `{i_inv.get('icd10')}`)\n\n**Ordered Tests**: {i_inv.get('investigations')}\n\n**Exam**: {i_inv.get('exam')}")
+            else:
+                st.info("Initial assessment recorded.")
+        with c_r2:
+            st.markdown("##### Returned Lab Findings (Post-Lab)")
+            if u_rep:
+                st.success(f"**Lab Findings**: {u_rep.get('investigations', e_meta.get('lab_results', 'Lab complete'))}\n\n**Confirmed Diagnosis**: `{u_rep.get('final_diagnosis')}` (ICD-10: `{u_rep.get('icd10')}`)\n\n**Technician**: {u_rep.get('author_name')}")
+            else:
+                st.warning("Lab report pending submission.")
+
+        st.markdown("---")
+        st.subheader("AI Decision Support & Clinical Interpretation")
+        
+        # Clinical AI Decision Support Generator based on findings
+        lab_text_val = u_rep.get("investigations", "") if u_rep else "Malaria RDT Positive"
+        diag_suggested = u_rep.get("final_diagnosis", "Malaria") if u_rep else "Malaria"
+        icd_suggested = u_rep.get("icd10", "B54") if u_rep else "B54"
+
+        ai_rec_text = f"**AI Clinical Insight**: Laboratory findings confirm **{diag_suggested}** (ICD-10: **{icd_suggested}**).\n- *Recommended First-Line Therapy*: Artemisinin-based Combination Therapy (ACT) / standard protocol.\n- *Patient Monitoring*: Advise full medication adherence and prompt return if symptoms worsen."
+        st.info(ai_rec_text)
+
+        st.markdown("---")
+        st.subheader("Final Care Card & SOAP Note Sign-Off")
+        
+        with st.form("doctor_final_signoff_form"):
+            col_f1, col_f2 = st.columns(2)
+            with col_f1:
+                fin_diag = st.text_input("Final Primary Diagnosis:", value=diag_suggested)
+                fin_icd = st.text_input("Final ICD-10 Code:", value=icd_suggested)
+                fin_disp = st.selectbox("Discharge Disposition:", ["Discharged Home with Prescription", "Admitted for Inpatient Observation", "Referred to Specialist Clinic"])
+            with col_f2:
+                fin_meds = st.text_input("Final Prescribed Medications:", value="Artemether-Lumefantrine 80/480mg PO BID x 3 days with food; Paracetamol 1g PRN")
+                fin_plan = st.text_input("Comprehensive Treatment & Discharge Plan:", value="Complete 3-day ACT course. Maintain hydration. Return if fever persists beyond 72 hours.")
+
+            default_fin_soap = f"S: Patient presented with {i_inv.get('chief_complaint', 'fever')}. O: Exam: {i_inv.get('exam', 'vitals stable')}; Lab Results: {lab_text_val}. A: Confirmed {fin_diag} (ICD-10: {fin_icd}). P: {fin_meds}. Disposition: {fin_disp}."
+            fin_soap = st.text_area("Finalized Comprehensive SOAP Note:", value=default_fin_soap, height=90)
+
+            if st.form_submit_button("Approve, Sign-Off & Finalize Patient Care Card", type="primary", use_container_width=True):
+                res_fin = registry.doctor_finalize_encounter(
+                    encounter_id=rev_enc_choice,
+                    final_diagnosis=fin_diag,
+                    final_icd10=fin_icd,
+                    final_medications=fin_meds,
+                    final_treatment_plan=fin_plan,
+                    final_soap_note=fin_soap,
+                    discharge_disposition=fin_disp,
+                    doctor_name=current_user["name"]
+                )
+                st.success(f"Encounter {rev_enc_choice} successfully finalized by {current_user['name']}! Marked as '{res_fin['status']}'.")
+                st.rerun()
 
 elif "3. Lab Queue" in portal_choice:
     st.markdown('<div class="main-header">Laboratory Results Submission Portal</div>', unsafe_allow_html=True)
