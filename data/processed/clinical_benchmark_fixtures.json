@@ -1,0 +1,24 @@
+[
+  {
+    "encounter_id": "ENC-001",
+    "specialty": "Cardiology",
+    "dialogue": "Doctor: How long have you had this chest tightness?\nPatient: For about 4 days, especially when walking up stairs.\nDoctor: BP is 150/95, HR is 88 bpm. We will start Lisinopril 10mg daily and order an ECG.",
+    "target_soap": {
+      "subjective": "Patient reports 4-day history of exertional chest tightness. Denies radiation.",
+      "objective": "BP 150/95, HR 88 bpm. Regular rhythm.",
+      "assessment": "Hypertension; exertional chest discomfort suspicious for angina.",
+      "plan": "Initiate Lisinopril 10mg PO QD. Order 12-lead ECG and baseline troponins."
+    }
+  },
+  {
+    "encounter_id": "ENC-002",
+    "specialty": "Pulmonology",
+    "dialogue": "Doctor: Tell me about your breathing.\nPatient: I am wheezing a lot since yesterday and coughing up white phlegm.\nDoctor: SpO2 is 92%, Respiratory rate is 22 breaths/min. Lung exam shows bilateral wheezing.",
+    "target_soap": {
+      "subjective": "Acute dyspnea and wheezing with productive cough.",
+      "objective": "SpO2 92%, RR 22. Bilateral expiratory wheezes.",
+      "assessment": "Asthma exacerbation.",
+      "plan": "Nebulized Albuterol stat. Prescribe Prednisone 40mg taper."
+    }
+  }
+]
