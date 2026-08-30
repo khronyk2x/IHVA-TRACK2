@@ -289,13 +289,30 @@ elif "2. Doctor Queue" in portal_choice:
 
             if st.session_state.get("show_audio_drawer"):
                 with st.container():
-                    st.markdown("##### Speech-to-Text with Hausa Clinical Translation")
-                    if st.button("Simulate Hausa Doctor-Patient Dialogue", use_container_width=True, key="btn_sim_hausa_d"):
-                        aud_res = audio_transcriber.transcribe_audio(None, language="Hausa")
-                        st.session_state["transcript_text"] = aud_res["english_transcript"]
-                        st.session_state["show_audio_drawer"] = False
-                        st.success("Transcribed and translated into clinical English!")
-                        st.rerun()
+                    st.markdown("##### Multilingual Speech-to-Text & Regional Translation")
+                    c_lang1, c_lang2 = st.columns([1.5, 1])
+                    with c_lang1:
+                        chosen_voice_lang = st.selectbox(
+                            "Select Consultation Spoken Language:",
+                            ["Hausa", "Yoruba", "Igbo", "Pidgin", "French", "Arabic", "English"],
+                            key="voice_lang_choice"
+                        )
+                    with c_lang2:
+                        voice_mode = st.radio("Voice Input Mode:", ["Simulate Dialogue", "Microphone"], horizontal=True, key="voice_mode_rad")
+
+                    c_btn_a, c_btn_b = st.columns(2)
+                    with c_btn_a:
+                        if st.button(f"Transcribe & Translate ({chosen_voice_lang})", use_container_width=True, key="btn_trans_voice"):
+                            aud_res = audio_transcriber.transcribe_audio(None, language=chosen_voice_lang)
+                            if aud_res["success"]:
+                                st.session_state["transcript_text"] = aud_res["english_transcript"]
+                                st.session_state["show_audio_drawer"] = False
+                                st.success(f"Transcribed {chosen_voice_lang} speech and translated into standardized clinical English!")
+                                st.rerun()
+                    with c_btn_b:
+                        if st.button("Close Voice Panel", use_container_width=True, key="btn_close_voice"):
+                            st.session_state["show_audio_drawer"] = False
+                            st.rerun()
 
             doc_narrative = st.text_area(
                 "Physician Consultation Notes & Dialogue:",
